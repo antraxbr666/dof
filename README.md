@@ -2,7 +2,7 @@
 
 # 🐋 dof
 
-> A beautiful, blazing-fast Docker container lister with Catppuccin Mocha colors and real-time stats.
+> A beautiful, blazing-fast terminal Docker container view and real-time stats.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-stable-orange.svg)
