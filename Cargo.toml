@@ -1,0 +1,19 @@
+[package]
+name = "dof"
+version = "0.3.3"
+edition = "2021"
+
+[dependencies]
+bollard = { version = "0.21", features = ["chrono"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tabled = { version = "0.21", features = ["ansi"] }
+indicatif = "0.18"
+make_colors = "1.0"
+catppuccin = "2.8"
+regex = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
