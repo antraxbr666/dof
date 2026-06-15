@@ -93,8 +93,20 @@ get_installed_version() {
 }
 
 version_gt() {
-    # Returns 0 if $1 > $2 (semver comparison)
-    [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]
+    # Returns 0 if $1 > $2 (semver comparison without sort -V)
+    local IFS='.'
+    local i v1=($1) v2=($2)
+    for i in 0 1 2; do
+        local num1=${v1[$i]:-0}
+        local num2=${v2[$i]:-0}
+        if [ "$num1" -gt "$num2" ]; then
+            return 0
+        fi
+        if [ "$num1" -lt "$num2" ]; then
+            return 1
+        fi
+    done
+    return 1
 }
 
 # ─── Download ────────────────────────────────────────────────────
