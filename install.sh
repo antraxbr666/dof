@@ -37,13 +37,8 @@ error()   { echo -e "  ${CROSS}  ${RED}$1${NC}" >&2; exit 1; }
 
 banner() {
     echo "" >&2
-    echo -e "  ${LAVENDER}${BOLD}         _____ ____  _     _     _   ${NC}" >&2
-    echo -e "  ${LAVENDER}${BOLD}        |  ___|  _ \\| |   | |   | |  ${NC}" >&2
-    echo -e "  ${LAVENDER}${BOLD}        | |_  | |_) | |   | |   | |  ${NC}" >&2
-    echo -e "  ${LAVENDER}${BOLD}        |  _| |  __/| |___| |___| |__${NC}" >&2
-    echo -e "  ${LAVENDER}${BOLD}        |_|   |_|   |_____|_____|____|${NC}" >&2
-    echo "" >&2
-    echo -e "  ${DIM}${OVERLAY}Docker Usage Utility — A better 'docker ps'${NC}" >&2
+    echo -e "  ${LAVENDER}${BOLD}dof${NC} ${DIM}— A beautiful, blazing-fast terminal Docker container view and real-time stats.${NC}" >&2
+    echo -e "  ${TEAL}${BOLD}Install Script${NC}" >&2
     echo "" >&2
 }
 
@@ -91,7 +86,7 @@ get_latest_version() {
 
 get_installed_version() {
     if command -v "$BINARY" &>/dev/null; then
-        "$BINARY" --version 2>/dev/null | awk '{print $2}' | sed 's/^v//'
+        "$BINARY" --version 2>/dev/null | head -1 | awk '{print $NF}' | sed 's/^v//'
     else
         echo ""
     fi
