@@ -103,12 +103,17 @@ install_binary() {
     local tmp_file=$1
 
     if [ -w "$INSTALL_DIR" ]; then
-        mv -f "$tmp_file" "$INSTALL_DIR/$BINARY"
+        rm -f "$INSTALL_DIR/$BINARY"
+        cp "$tmp_file" "$INSTALL_DIR/$BINARY"
+        chmod +x "$INSTALL_DIR/$BINARY"
     else
         warn "Need sudo to install to $INSTALL_DIR"
         pause
-        sudo mv -f "$tmp_file" "$INSTALL_DIR/$BINARY"
+        sudo rm -f "$INSTALL_DIR/$BINARY"
+        sudo cp "$tmp_file" "$INSTALL_DIR/$BINARY"
+        sudo chmod +x "$INSTALL_DIR/$BINARY"
     fi
+    rm -f "$tmp_file"
 }
 
 # ─── Main ────────────────────────────────────────────────────────
