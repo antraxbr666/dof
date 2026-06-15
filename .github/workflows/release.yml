@@ -9,67 +9,75 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-            artifact: dof-linux-x86_64
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-            artifact: dof-linux-aarch64
-
+  build-x86_64:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-musl
 
-      - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/dof ${{ matrix.artifact }}
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-musl
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: dof-x86_64-linux
+          path: target/x86_64-unknown-linux-musl/release/dof
+
+  build-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: cargo build --release --target aarch64-unknown-linux-musl
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dof-aarch64-linux
+          path: target/aarch64-unknown-linux-musl/release/dof
 
   release:
-    name: Create Release
-    needs: build
+    needs: [build-x86_64, build-aarch64]
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
 
-      - name: Generate checksums
+      - name: Prepare binaries
         run: |
-          cd artifacts
-          sha256sum dof-linux-x86_64 dof-linux-aarch64 > sha256sums.txt
-          cat sha256sums.txt
+          mv artifacts/dof-x86_64-linux/dof dof-x86_64-linux
+          mv artifacts/dof-aarch64-linux/dof dof-aarch64-linux
+          chmod +x dof-x86_64-linux dof-aarch64-linux
 
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
           files: |
-            artifacts/dof-linux-x86_64
-            artifacts/dof-linux-aarch64
-            artifacts/sha256sums.txt
+            dof-x86_64-linux
+            dof-aarch64-linux
+          generate_release_notes: true
+          draft: false
+          prerelease: false
