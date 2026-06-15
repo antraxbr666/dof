@@ -26,138 +26,145 @@ CHECK="✅"
 CROSS="❌"
 WARN="⚠️"
 
-info()    { echo -e "  ${DOCKER}  $1" >&2; }
+info() { echo -e "  ${DOCKER}  $1" >&2; }
 success() { echo -e "  ${CHECK}  ${GREEN}$1${NC}" >&2; }
-warn()    { echo -e "  ${WARN}  ${YELLOW}$1${NC}" >&2; }
-error()   { echo -e "  ${CROSS}  ${RED}$1${NC}" >&2; exit 1; }
+warn() { echo -e "  ${WARN}  ${YELLOW}$1${NC}" >&2; }
+error() {
+  echo -e "  ${CROSS}  ${RED}$1${NC}" >&2
+  exit 1
+}
 
 banner() {
-    echo "" >&2
-    echo -e "  ${LAVENDER}${BOLD}dof${NC} ${DIM}— A beautiful, blazing-fast terminal Docker container view and real-time stats.${NC}" >&2
-    echo -e "  ${TEAL}${BOLD}Install Script${NC}" >&2
-    echo "" >&2
+  echo "" >&2
+  echo -e "  ${LAVENDER}${BOLD}dof${NC} ${DIM}— A beautiful, blazing-fast terminal Docker container view and real-time stats.${NC}" >&2
+  echo -e "  ${TEAL}${BOLD}Install Script${NC}" >&2
+  echo "" >&2
 }
 
 divider() {
-    echo -e "  ${DIM}──────────────────────────────────────────${NC}" >&2
+  echo -e "  ${DIM}──────────────────────────────────────────${NC}" >&2
 }
 
+# ─── Pause Function ──────────────────────────────────────────────
 pause() {
-    echo "" >&2
-    echo -e "  ${YELLOW}Press any key to continue...${NC}" >&2
-    if [ -t 0 ]; then
-        read -n 1 -s -r
-    else
-        sleep 1
-    fi
+  echo "" >&2
+  echo -e "  ${YELLOW}Press any key to continue...${NC}" >&2
+
+  # Read from the physical terminal (/dev/tty) instead of stdin
+  # This ensures it works even when piped via curl
+  if [ -n "$ZSH_VERSION" ]; then
+    read -s -k 1 </dev/tty || true
+  else
+    read -n 1 -s -r </dev/tty || true
+  fi
 }
 
 # ─── Architecture Detection ──────────────────────────────────────
 detect_arch() {
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64|amd64)   echo "x86_64" ;;
-        aarch64|arm64)  echo "aarch64" ;;
-        *) error "Unsupported architecture: $arch" ;;
-    esac
+  local arch
+  arch=$(uname -m)
+  case "$arch" in
+  x86_64 | amd64) echo "x86_64" ;;
+  aarch64 | arm64) echo "aarch64" ;;
+  *) error "Unsupported architecture: $arch" ;;
+  esac
 }
 
 # ─── OS Detection ────────────────────────────────────────────────
 detect_os() {
-    local os
-    os=$(uname -s)
-    case "$os" in
-        Linux) echo "linux" ;;
-        *)     error "Unsupported OS: $os (only Linux is supported)" ;;
-    esac
+  local os
+  os=$(uname -s)
+  case "$os" in
+  Linux) echo "linux" ;;
+  *) error "Unsupported OS: $os (only Linux is supported)" ;;
+  esac
 }
 
 # ─── Version Detection ───────────────────────────────────────────
 get_latest_version() {
-    local version
-    version=$(curl -s "https://api.github.com/repos/$REPO/releases" | grep -o '"tag_name": "[^"]*"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
-    if [ -z "$version" ]; then
-        error "Failed to get latest version"
-    fi
-    echo "$version"
+  local version
+  version=$(curl -s "https://api.github.com/repos/$REPO/releases" | grep -o '"tag_name": "[^"]*"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
+  if [ -z "$version" ]; then
+    error "Failed to get latest version"
+  fi
+  echo "$version"
 }
 
 # ─── Download ────────────────────────────────────────────────────
 download_binary() {
-    local arch=$1
-    local version=$2
-    local url="https://github.com/$REPO/releases/download/v${version}/dof-${arch}-linux"
-    local tmp_file="/tmp/dof-${arch}-linux"
+  local arch=$1
+  local version=$2
+  local url="https://github.com/$REPO/releases/download/v${version}/dof-${arch}-linux"
+  local tmp_file="/tmp/dof-${arch}-linux"
 
-    info "Downloading ${TEAL}${BINARY} v${version}${NC} for ${LAVENDER}${arch}${NC}..."
-    echo "" >&2
-    curl -#L "$url" -o "$tmp_file"
+  info "Downloading ${TEAL}${BINARY} v${version}${NC} for ${LAVENDER}${arch}${NC}..."
+  echo "" >&2
+  curl -#L "$url" -o "$tmp_file"
 
-    if [ ! -f "$tmp_file" ]; then
-        error "Download failed"
-    fi
+  if [ ! -f "$tmp_file" ]; then
+    error "Download failed"
+  fi
 
-    chmod +x "$tmp_file"
-    echo "$tmp_file"
+  chmod +x "$tmp_file"
+  echo "$tmp_file"
 }
 
 # ─── Install ─────────────────────────────────────────────────────
 install_binary() {
-    local tmp_file=$1
+  local tmp_file=$1
 
-    if [ -w "$INSTALL_DIR" ]; then
-        rm -f "$INSTALL_DIR/$BINARY"
-        cp "$tmp_file" "$INSTALL_DIR/$BINARY"
-        chmod +x "$INSTALL_DIR/$BINARY"
-    else
-        warn "Need sudo to install to $INSTALL_DIR"
-        pause
-        sudo rm -f "$INSTALL_DIR/$BINARY"
-        sudo cp "$tmp_file" "$INSTALL_DIR/$BINARY"
-        sudo chmod +x "$INSTALL_DIR/$BINARY"
-    fi
-    rm -f "$tmp_file"
+  if [ -w "$INSTALL_DIR" ]; then
+    rm -f "$INSTALL_DIR/$BINARY"
+    cp "$tmp_file" "$INSTALL_DIR/$BINARY"
+    chmod +x "$INSTALL_DIR/$BINARY"
+  else
+    warn "Need sudo to install to $INSTALL_DIR"
+    pause
+    sudo rm -f "$INSTALL_DIR/$BINARY"
+    sudo cp "$tmp_file" "$INSTALL_DIR/$BINARY"
+    sudo chmod +x "$INSTALL_DIR/$BINARY"
+  fi
+  rm -f "$tmp_file"
 }
 
 # ─── Main ────────────────────────────────────────────────────────
 install_app() {
-    banner
+  banner
 
-    local arch os version tmp_file
+  local arch os version tmp_file
 
-    arch=$(detect_arch)
-    os=$(detect_os)
-    version=$(get_latest_version)
+  arch=$(detect_arch)
+  os=$(detect_os)
+  version=$(get_latest_version)
 
-    info "Detected: ${TEAL}${os}-${arch}${NC}"
-    echo "" >&2
+  info "Detected: ${TEAL}${os}-${arch}${NC}"
+  echo "" >&2
 
-    tmp_file=$(download_binary "$arch" "$version")
-    install_binary "$tmp_file"
+  tmp_file=$(download_binary "$arch" "$version")
+  install_binary "$tmp_file"
 
-    echo "" >&2
-    divider
-    success "${BOLD}${BINARY} v${version}${NC} installed successfully!"
-    divider
-    echo "" >&2
-    echo -e "  ${ROCKET}  ${DIM}Run ${LAVENDER}${BOLD}dof${NC}${DIM} to get started!${NC}" >&2
-    echo -e "  ${DIM}    Try ${LAVENDER}dof --help${NC}${DIM} for all options${NC}" >&2
-    echo "" >&2
+  echo "" >&2
+  divider
+  success "${BOLD}${BINARY} v${version}${NC} installed successfully!"
+  divider
+  echo "" >&2
+  echo -e "  ${ROCKET}  ${DIM}Run ${LAVENDER}${BOLD}dof${NC}${DIM} to get started!${NC}" >&2
+  echo -e "  ${DIM}    Try ${LAVENDER}dof --help${NC}${DIM} for all options${NC}" >&2
+  echo "" >&2
 }
 
 main() {
-    case "${1:-}" in
-        --help|-h)
-            banner
-            echo -e "  ${MAUVE}${BOLD}USAGE:${NC}" >&2
-            echo -e "    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash" >&2
-            echo "" >&2
-            ;;
-        *)
-            install_app
-            ;;
-    esac
+  case "${1:-}" in
+  --help | -h)
+    banner
+    echo -e "  ${MAUVE}${BOLD}USAGE:${NC}" >&2
+    echo -e "    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash" >&2
+    echo "" >&2
+    ;;
+  *)
+    install_app
+    ;;
+  esac
 }
 
 main "$@"
