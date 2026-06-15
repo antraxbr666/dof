@@ -44,9 +44,8 @@ divider() {
 
 pause() {
     echo "" >&2
-    echo -e "  ${YELLOW}Press any key to continue...${NC}" >&2
-    read -n 1 -s
-    echo "" >&2
+    echo -e "  ${YELLOW}Press Enter to continue...${NC}" >&2
+    read -r
 }
 
 # ─── Architecture Detection ──────────────────────────────────────
@@ -73,7 +72,7 @@ detect_os() {
 # ─── Version Detection ───────────────────────────────────────────
 get_latest_version() {
     local version
-    version=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    version=$(curl -s "https://api.github.com/repos/$REPO/releases" | grep -o '"tag_name": "[^"]*"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
     if [ -z "$version" ]; then
         error "Failed to get latest version"
     fi
@@ -104,11 +103,11 @@ install_binary() {
     local tmp_file=$1
 
     if [ -w "$INSTALL_DIR" ]; then
-        mv "$tmp_file" "$INSTALL_DIR/$BINARY"
+        mv -f "$tmp_file" "$INSTALL_DIR/$BINARY"
     else
         warn "Need sudo to install to $INSTALL_DIR"
         pause
-        sudo mv "$tmp_file" "$INSTALL_DIR/$BINARY"
+        sudo mv -f "$tmp_file" "$INSTALL_DIR/$BINARY"
     fi
 }
 
