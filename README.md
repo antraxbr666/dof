@@ -76,12 +76,6 @@ cargo --version
 curl -fsSL https://raw.githubusercontent.com/antraxbr666/dof/main/install.sh | bash
 ```
 
-### Uninstall
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/antraxbr666/dof/main/install.sh | bash -s -- --uninstall
-```
-
 ### From source
 
 ```bash

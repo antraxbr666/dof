@@ -25,8 +25,6 @@ ROCKET="🚀"
 CHECK="✅"
 CROSS="❌"
 WARN="⚠️"
-TRASH="🗑️"
-WAVE="👋"
 
 info()    { echo -e "  ${DOCKER}  $1" >&2; }
 success() { echo -e "  ${CHECK}  ${GREEN}$1${NC}" >&2; }
@@ -114,36 +112,10 @@ install_binary() {
     fi
 }
 
-# ─── Uninstall ───────────────────────────────────────────────────
-uninstall() {
-    banner
-    divider
-    echo -e "  ${TRASH}  ${RED}${BOLD}Uninstalling ${BINARY}${NC}" >&2
-    divider
-    echo "" >&2
-
-    if [ ! -f "$INSTALL_DIR/$BINARY" ]; then
-        warn "${BINARY} is not installed"
-        echo "" >&2
-        exit 0
-    fi
-
-    if [ -w "$INSTALL_DIR" ]; then
-        rm -f "$INSTALL_DIR/$BINARY"
-    else
-        warn "Need sudo to remove from $INSTALL_DIR"
-        pause
-        sudo rm -f "$INSTALL_DIR/$BINARY"
-    fi
-
-    success "${BINARY} has been removed from $INSTALL_DIR"
-    echo "" >&2
-    echo -e "  ${WAVE}  ${DIM}${OVERLAY}See you next time!${NC}" >&2
-    echo "" >&2
-}
-
-# ─── Install ─────────────────────────────────────────────────────
+# ─── Main ────────────────────────────────────────────────────────
 install_app() {
+    banner
+
     local arch os version tmp_file
 
     arch=$(detect_arch)
@@ -166,24 +138,15 @@ install_app() {
     echo "" >&2
 }
 
-# ─── Main ────────────────────────────────────────────────────────
 main() {
     case "${1:-}" in
-        --uninstall|--remove)
-            uninstall
-            ;;
         --help|-h)
             banner
             echo -e "  ${MAUVE}${BOLD}USAGE:${NC}" >&2
             echo -e "    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash" >&2
             echo "" >&2
-            echo -e "  ${MAUVE}${BOLD}OPTIONS:${NC}" >&2
-            echo -e "    ${GREEN}--uninstall${NC}      Remove ${BINARY} from system" >&2
-            echo -e "    ${GREEN}--help${NC}, ${GREEN}-h${NC}         Show this help" >&2
-            echo "" >&2
             ;;
         *)
-            banner
             install_app
             ;;
     esac
