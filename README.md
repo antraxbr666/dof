@@ -70,28 +70,29 @@ cargo --version
 
 ## 🚀 Installation
 
+### One-line install (recommended)
+
 ```bash
-# 1. Clone the repository
-git clone https://github.com/antraxbr666/dof.git
-cd dof
-
-# 2. Build the release binary
-cargo build --release
-
-# 3. Optionally install to your PATH
-cp target/release/dof ~/.local/bin/
-# or
-sudo cp target/release/dof /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/antraxbr666/dof/main/install.sh | bash
 ```
 
-### Build Requirements
+### Update / Uninstall
 
 ```bash
-# Minimum Rust version
-rustc 1.70+ recommended
+# Update to latest version
+curl -fsSL https://raw.githubusercontent.com/antraxbr666/dof/main/install.sh | bash -s -- --update
 
-# System libraries (usually present on any Linux)
-glibc 2.31+
+# Uninstall
+curl -fsSL https://raw.githubusercontent.com/antraxbr666/dof/main/install.sh | bash -s -- --uninstall
+```
+
+### From source
+
+```bash
+git clone https://github.com/antraxbr666/dof.git
+cd dof
+cargo build --release
+sudo cp target/release/dof /usr/local/bin/
 ```
 
 ---
