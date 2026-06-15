@@ -51,6 +51,13 @@ divider() {
     echo -e "  ${DIM}──────────────────────────────────────────${NC}" >&2
 }
 
+pause() {
+    echo "" >&2
+    echo -e "  ${YELLOW}Press any key to continue...${NC}" >&2
+    read -n 1 -s
+    echo "" >&2
+}
+
 # ─── Architecture Detection ──────────────────────────────────────
 detect_arch() {
     local arch
@@ -90,6 +97,11 @@ get_installed_version() {
     fi
 }
 
+version_gt() {
+    # Returns 0 if $1 > $2 (semver comparison)
+    [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]
+}
+
 # ─── Download ────────────────────────────────────────────────────
 download_binary() {
     local arch=$1
@@ -117,6 +129,7 @@ install_binary() {
         mv "$tmp_file" "$INSTALL_DIR/$BINARY"
     else
         warn "Need sudo to install to $INSTALL_DIR"
+        pause
         sudo mv "$tmp_file" "$INSTALL_DIR/$BINARY"
     fi
 }
@@ -138,6 +151,8 @@ uninstall() {
     if [ -w "$INSTALL_DIR" ]; then
         rm -f "$INSTALL_DIR/$BINARY"
     else
+        warn "Need sudo to remove from $INSTALL_DIR"
+        pause
         sudo rm -f "$INSTALL_DIR/$BINARY"
     fi
 
@@ -147,11 +162,11 @@ uninstall() {
     echo "" >&2
 }
 
-# ─── Update ──────────────────────────────────────────────────────
-update() {
+# ─── Upgrade ─────────────────────────────────────────────────────
+upgrade() {
     banner
     divider
-    echo -e "  ${GEAR}  ${MAUVE}${BOLD}Checking for updates...${NC}" >&2
+    echo -e "  ${GEAR}  ${MAUVE}${BOLD}Checking for upgrades...${NC}" >&2
     divider
     echo "" >&2
 
@@ -166,17 +181,17 @@ update() {
         return
     fi
 
-    info "Installed: ${YELLOW}v${installed}${NC}"
-    info "Latest:    ${GREEN}v${latest}${NC}"
+    info "Installed version: ${YELLOW}v${installed}${NC}"
+    info "Latest version:    ${GREEN}v${latest}${NC}"
     echo "" >&2
 
-    if [ "$installed" = "$latest" ]; then
-        success "${BINARY} is already up to date!"
+    if ! version_gt "$latest" "$installed"; then
+        success "${BINARY} is already up to date! (v${installed})"
         echo "" >&2
         exit 0
     fi
 
-    warn "New version available: ${RED}v${installed}${NC} → ${GREEN}v${latest}${NC}"
+    warn "Upgrade available: ${RED}v${installed}${NC} ${ARROW} ${GREEN}v${latest}${NC}"
     echo "" >&2
 
     local arch os tmp_file
@@ -187,7 +202,7 @@ update() {
     install_binary "$tmp_file"
 
     echo "" >&2
-    success "${BINARY} updated to ${GREEN}v${latest}${NC}!"
+    success "${BINARY} upgraded to ${GREEN}v${latest}${NC}!"
     echo "" >&2
 }
 
@@ -218,8 +233,8 @@ install_app() {
 # ─── Main ────────────────────────────────────────────────────────
 main() {
     case "${1:-}" in
-        --update|-u)
-            update
+        --upgrade|-u)
+            upgrade
             ;;
         --uninstall|--remove)
             uninstall
@@ -230,7 +245,7 @@ main() {
             echo -e "    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash" >&2
             echo "" >&2
             echo -e "  ${MAUVE}${BOLD}OPTIONS:${NC}" >&2
-            echo -e "    ${GREEN}--update${NC}, ${GREEN}-u${NC}        Update to latest version" >&2
+            echo -e "    ${GREEN}--upgrade${NC}, ${GREEN}-u${NC}      Upgrade to latest version" >&2
             echo -e "    ${GREEN}--uninstall${NC}      Remove ${BINARY} from system" >&2
             echo -e "    ${GREEN}--help${NC}, ${GREEN}-h${NC}         Show this help" >&2
             echo "" >&2
