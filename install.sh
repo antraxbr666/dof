@@ -44,8 +44,12 @@ divider() {
 
 pause() {
     echo "" >&2
-    echo -e "  ${YELLOW}Press Enter to continue...${NC}" >&2
-    read -r
+    echo -e "  ${YELLOW}Press any key to continue...${NC}" >&2
+    if [ -t 0 ]; then
+        read -n 1 -s -r
+    else
+        sleep 1
+    fi
 }
 
 # ─── Architecture Detection ──────────────────────────────────────
