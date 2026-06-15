@@ -25,9 +25,7 @@ ROCKET="🚀"
 CHECK="✅"
 CROSS="❌"
 WARN="⚠️"
-GEAR="⚙️"
 TRASH="🗑️"
-ARROW="➜"
 WAVE="👋"
 
 info()    { echo -e "  ${DOCKER}  $1" >&2; }
@@ -82,31 +80,6 @@ get_latest_version() {
         error "Failed to get latest version"
     fi
     echo "$version"
-}
-
-get_installed_version() {
-    if command -v "$BINARY" &>/dev/null; then
-        "$BINARY" --version 2>/dev/null | head -1 | awk '{print $NF}' | sed 's/^v//'
-    else
-        echo ""
-    fi
-}
-
-version_gt() {
-    # Returns 0 if $1 > $2 (semver comparison without sort -V)
-    local IFS='.'
-    local i v1=($1) v2=($2)
-    for i in 0 1 2; do
-        local num1=${v1[$i]:-0}
-        local num2=${v2[$i]:-0}
-        if [ "$num1" -gt "$num2" ]; then
-            return 0
-        fi
-        if [ "$num1" -lt "$num2" ]; then
-            return 1
-        fi
-    done
-    return 1
 }
 
 # ─── Download ────────────────────────────────────────────────────
@@ -169,50 +142,6 @@ uninstall() {
     echo "" >&2
 }
 
-# ─── Upgrade ─────────────────────────────────────────────────────
-upgrade() {
-    banner
-    divider
-    echo -e "  ${GEAR}  ${MAUVE}${BOLD}Checking for upgrades...${NC}" >&2
-    divider
-    echo "" >&2
-
-    local latest installed
-    latest=$(get_latest_version)
-    installed=$(get_installed_version)
-
-    if [ -z "$installed" ]; then
-        warn "${BINARY} is not installed. Running fresh install..."
-        echo "" >&2
-        install_app
-        return
-    fi
-
-    info "Installed version: ${YELLOW}v${installed}${NC}"
-    info "Latest version:    ${GREEN}v${latest}${NC}"
-    echo "" >&2
-
-    if ! version_gt "$latest" "$installed"; then
-        success "${BINARY} is already up to date! (v${installed})"
-        echo "" >&2
-        exit 0
-    fi
-
-    warn "Upgrade available: ${RED}v${installed}${NC} ${ARROW} ${GREEN}v${latest}${NC}"
-    echo "" >&2
-
-    local arch os tmp_file
-    arch=$(detect_arch)
-    os=$(detect_os)
-
-    tmp_file=$(download_binary "$arch" "$latest")
-    install_binary "$tmp_file"
-
-    echo "" >&2
-    success "${BINARY} upgraded to ${GREEN}v${latest}${NC}!"
-    echo "" >&2
-}
-
 # ─── Install ─────────────────────────────────────────────────────
 install_app() {
     local arch os version tmp_file
@@ -240,9 +169,6 @@ install_app() {
 # ─── Main ────────────────────────────────────────────────────────
 main() {
     case "${1:-}" in
-        --upgrade|-u)
-            upgrade
-            ;;
         --uninstall|--remove)
             uninstall
             ;;
@@ -252,7 +178,6 @@ main() {
             echo -e "    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash" >&2
             echo "" >&2
             echo -e "  ${MAUVE}${BOLD}OPTIONS:${NC}" >&2
-            echo -e "    ${GREEN}--upgrade${NC}, ${GREEN}-u${NC}      Upgrade to latest version" >&2
             echo -e "    ${GREEN}--uninstall${NC}      Remove ${BINARY} from system" >&2
             echo -e "    ${GREEN}--help${NC}, ${GREEN}-h${NC}         Show this help" >&2
             echo "" >&2
