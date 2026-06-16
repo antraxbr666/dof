@@ -1,9 +1,7 @@
 mod cgroup;
 
-use bollard::query_parameters::{ListContainersOptions, StatsOptions};
+use bollard::query_parameters::ListContainersOptions;
 use bollard::Docker;
-use futures_util::future::join_all;
-use futures_util::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use tabled::builder::Builder;
@@ -11,7 +9,6 @@ use tabled::settings::object::Columns;
 use tabled::settings::{Alignment, Modify, Padding, Style};
 use tokio::time::{sleep, Duration, Instant};
 
-// ponytail: inline ANSI helpers replace make_colors crate
 fn c(s: &str, r: u8, g: u8, b: u8) -> String {
     format!("\x1b[38;2;{r};{g};{b}m{s}\x1b[0m")
 }
@@ -188,18 +185,14 @@ fn system_memory_bytes() -> u64 {
     u64::MAX
 }
 
+// ponytail: handles >100% (multi-core container without --cpus) — bar fills at 100%, label shows actual value
 fn cpu_gauge(percent: f64, width: usize) -> String {
-    let clamped = percent.min(100.0);
-    let filled = ((clamped / 100.0) * width as f64).round() as usize;
+    let filled = ((percent / 100.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     let empty = width.saturating_sub(filled);
 
     let filled_str = if filled > 0 {
-        if percent > 100.0 {
-            c(&"\u{2588}".repeat(filled), 243, 139, 168)
-        } else {
-            c(&"\u{2588}".repeat(filled), 166, 227, 161)
-        }
+        c(&"\u{2588}".repeat(filled), 166, 227, 161)
     } else {
         String::new()
     };
@@ -209,11 +202,7 @@ fn cpu_gauge(percent: f64, width: usize) -> String {
         String::new()
     };
 
-    if percent > 100.0 {
-        format!("{}{} >100%", filled_str, empty_str)
-    } else {
-        format!("{}{} {:.1}%", filled_str, empty_str, percent)
-    }
+    format!("{}{} {:.1}%", filled_str, empty_str, percent)
 }
 
 fn build_table(
@@ -289,49 +278,6 @@ fn build_table(
     table
 }
 
-fn get_cpu_total_usage(stats: &bollard::models::ContainerStatsResponse) -> u64 {
-    stats.cpu_stats.as_ref()
-        .and_then(|s| s.cpu_usage.as_ref())
-        .and_then(|u| u.total_usage)
-        .unwrap_or(0)
-}
-
-fn get_memory_usage(stats: &bollard::models::ContainerStatsResponse) -> (u64, u64) {
-    let usage = stats.memory_stats.as_ref()
-        .and_then(|m| m.usage)
-        .unwrap_or(0);
-    let limit = stats.memory_stats.as_ref()
-        .and_then(|m| m.limit)
-        .unwrap_or(u64::MAX);
-    (usage, limit)
-}
-
-async fn fetch_docker_stats_batch(
-    docker: &Docker,
-    ids: &[String],
-) -> HashMap<String, bollard::models::ContainerStatsResponse> {
-    let futures: Vec<_> = ids.iter().map(|id| {
-        let id = id.clone();
-        async move {
-            let options = StatsOptions {
-                stream: false,
-                one_shot: false,
-            };
-            let mut stream = docker.stats(&id, Some(options));
-            stream.next()
-                .await
-                .and_then(|r| r.ok())
-                .map(|stats| (id, stats))
-        }
-    }).collect();
-
-    join_all(futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
-}
-
 // ponytail: single-threaded runtime, no concurrent work
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -386,106 +332,44 @@ async fn main() {
     let stats_map = if running_ids.is_empty() {
         HashMap::new()
     } else {
-        let num_cpus = std::thread::available_parallelism()
-            .map(|n| n.get() as f64)
-            .unwrap_or(1.0);
-
         let ids_ref: Vec<&str> = running_ids.iter().map(|s| s.as_str()).collect();
         let cgroup_map = cgroup::build_cgroup_map(&ids_ref);
 
-        let cgroup_key_set: HashSet<&str> = cgroup_map.keys().map(|s| s.as_str()).collect();
-        let api_ids: Vec<String> = running_ids.iter()
-            .filter(|id| !cgroup_key_set.contains(id.as_str()))
-            .cloned()
-            .collect();
-
-        if !api_ids.is_empty() {
-            eprintln!("Warning: {} container(s) without cgroup path, using Docker API fallback", api_ids.len());
-            for id in &api_ids {
-                eprintln!("  - {} (Docker API stats)", &id[..12]);
-            }
-        }
-
-        // ── t0 sampling ──
-        let t0_instant = Instant::now();
-
-        let mut t0: HashMap<String, cgroup::CgroupSnapshot> = HashMap::new();
+        // ponytail: Instant measures real wall-clock between t0 and t1, eliminating sleep inaccuracy
+        let t0 = Instant::now();
+        let mut snapshots0: HashMap<String, cgroup::CgroupSnapshot> = HashMap::new();
         for (id, path) in &cgroup_map {
-            if let Some(snap) = cgroup::read_snapshot(path, id) {
-                t0.insert(id.clone(), snap);
-            } else {
-                let api_ids_set: HashSet<&str> = api_ids.iter().map(|s| s.as_str()).collect();
-                if !api_ids_set.contains(id.as_str()) {
-                    eprintln!("Warning: cgroup read failed for container {} at t0, marking for Docker API fallback", &id[..12]);
-                }
+            match cgroup::read_snapshot(path) {
+                Some(s) => { snapshots0.insert(id.clone(), s); }
+                None => { eprintln!("Warning: cgroup read failed for container {}", &id[..12]); }
             }
         }
 
-        let t0_api = if !api_ids.is_empty() {
-            fetch_docker_stats_batch(&docker, &api_ids).await
-        } else {
-            HashMap::new()
-        };
+        sleep(Duration::from_millis(100)).await;
+        let t1 = Instant::now();
+        let dt_us = t1.duration_since(t0).as_micros().max(1);
 
-        let elapsed = t0_instant.elapsed();
-        let remaining = Duration::from_millis(100).saturating_sub(elapsed);
-        sleep(remaining).await;
-        let t1_instant = Instant::now();
-        let actual_interval_us = t1_instant.duration_since(t0_instant).as_micros().max(1);
-
-        // ── t1 sampling ──
-        let mut t1: HashMap<String, cgroup::CgroupSnapshot> = HashMap::new();
+        let mut result = HashMap::new();
         for (id, path) in &cgroup_map {
-            if let Some(snap) = cgroup::read_snapshot(path, id) {
-                t1.insert(id.clone(), snap);
-            }
-        }
-
-        let t1_api = if !api_ids.is_empty() {
-            fetch_docker_stats_batch(&docker, &api_ids).await
-        } else {
-            HashMap::new()
-        };
-
-        // ── compute ──
-        let mut result: HashMap<String, (f64, String)> = HashMap::new();
-
-        for id in cgroup_map.keys() {
-            if let (Some(snap0), Some(snap1)) = (t0.get(id), t1.get(id)) {
-                let cpu_delta = snap1.cpu_usage_usec.saturating_sub(snap0.cpu_usage_usec);
-                let raw_pct = (cpu_delta as f64 / actual_interval_us as f64) * 100.0;
-
-                let cpu_pct = match snap1.cpu_quota_ratio {
-                    Some(ratio) if ratio > 0.0 => (raw_pct / ratio).min(100.0),
-                    _ => (raw_pct / num_cpus).min(100.0),
+            if let (Some(s0), Some(s1)) = (snapshots0.get(id), cgroup::read_snapshot(path)) {
+                let raw = (s1.cpu_usage_usec.saturating_sub(s0.cpu_usage_usec) as f64 / dt_us as f64) * 100.0;
+                // ponytail: normalize by --cpus quota when set; otherwise raw per-core %
+                let cpu_pct = match s1.cpu_quota_ratio {
+                    Some(r) if r > 0.0 => (raw / r).min(100.0),
+                    _ => raw,
                 };
-
-                let limit = if snap1.memory_limit == u64::MAX {
-                    sys_mem
-                } else {
-                    snap1.memory_limit
-                };
-                let mem_str = format!("{}/{}", human_bytes(snap1.memory_bytes), human_bytes(limit));
-
+                let limit = if s1.memory_limit == u64::MAX { sys_mem } else { s1.memory_limit };
+                let mem_str = format!("{}/{}", human_bytes(s1.memory_bytes), human_bytes(limit));
                 result.insert(id.clone(), (cpu_pct, mem_str));
             }
         }
 
-        for id in &api_ids {
-            if let (Some(s0), Some(s1)) = (t0_api.get(id), t1_api.get(id)) {
-                let cpu_delta_ns = get_cpu_total_usage(s1)
-                    .saturating_sub(get_cpu_total_usage(s0));
-                let actual_interval_ns = (actual_interval_us as f64) * 1000.0;
-                let raw_pct = (cpu_delta_ns as f64 / actual_interval_ns) * 100.0;
-                let cpu_pct = (raw_pct / num_cpus).min(100.0);
-
-                let (mem_bytes, mem_limit_raw) = get_memory_usage(s1);
-                let limit = if mem_limit_raw == u64::MAX { sys_mem } else { mem_limit_raw };
-                let mem_str = format!("{}/{}", human_bytes(mem_bytes), human_bytes(limit));
-
-                result.insert(id.clone(), (cpu_pct, mem_str));
-            } else {
-                eprintln!("Warning: Docker API stats failed for container {}", &id[..12]);
+        // ponytail: containers without cgroup paths (e.g. cgroup v1) get "ERR" in the table
+        for id in &running_ids {
+            if !result.contains_key(id) && cgroup_map.contains_key(id.as_str()) {
+                eprintln!("Warning: container {} has cgroup path but stats read failed", &id[..12]);
+            } else if !result.contains_key(id) {
+                eprintln!("Warning: container {} has no cgroup path — is this system using cgroup v1?", &id[..12]);
             }
         }
 

@@ -1,13 +1,12 @@
 [package]
 name = "dof"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 
 [dependencies]
 bollard = { version = "0.21", features = ["chrono"] }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 tabled = { version = "0.21", features = ["ansi"] }
-futures-util = "0.3"
 
 [profile.release]
 opt-level = 3

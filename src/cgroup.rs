@@ -8,6 +8,7 @@ pub struct CgroupSnapshot {
     pub cpu_usage_usec: u64,
     pub memory_bytes: u64,
     pub memory_limit: u64,
+    // ponytail: only for --cpus quota normalization; file is in-memory sysfs
     pub cpu_quota_ratio: Option<f64>,
 }
 
@@ -16,7 +17,6 @@ fn find_cgroup_dirs() -> HashMap<String, PathBuf> {
     let Ok(entries) = fs::read_dir(CGROUP_BASE) else {
         return map;
     };
-
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         if let Some(rest) = name.strip_prefix("docker-") {
@@ -25,7 +25,6 @@ fn find_cgroup_dirs() -> HashMap<String, PathBuf> {
             }
         }
     }
-
     map
 }
 
@@ -33,7 +32,7 @@ fn read_cpu_usage_usec(path: &PathBuf) -> Option<u64> {
     let content = fs::read_to_string(path.join("cpu.stat")).ok()?;
     for line in content.lines() {
         if let Some(val) = line.strip_prefix("usage_usec ") {
-            return val.trim().parse::<u64>().ok();
+            return val.trim().parse().ok();
         }
     }
     None
@@ -41,7 +40,7 @@ fn read_cpu_usage_usec(path: &PathBuf) -> Option<u64> {
 
 fn read_memory_current(path: &PathBuf) -> Option<u64> {
     let content = fs::read_to_string(path.join("memory.current")).ok()?;
-    content.trim().parse::<u64>().ok()
+    content.trim().parse().ok()
 }
 
 fn read_memory_limit(path: &PathBuf) -> Option<u64> {
@@ -50,10 +49,11 @@ fn read_memory_limit(path: &PathBuf) -> Option<u64> {
     if trimmed == "max" {
         Some(u64::MAX)
     } else {
-        trimmed.parse::<u64>().ok()
+        trimmed.parse().ok()
     }
 }
 
+// ponytail: reads cpu.max for --cpus normalization; returns None when no limit ("max")
 fn read_cpu_quota(path: &PathBuf) -> Option<f64> {
     let content = fs::read_to_string(path.join("cpu.max")).ok()?;
     let mut parts = content.split_whitespace();
@@ -70,94 +70,30 @@ fn read_cpu_quota(path: &PathBuf) -> Option<f64> {
     Some(quota / period)
 }
 
-fn read_snapshot_v1(container_id: &str) -> Option<CgroupSnapshot> {
-    let path_sets = [
-        (
-            "/sys/fs/cgroup/cpuacct/docker/{id}",
-            "/sys/fs/cgroup/memory/docker/{id}",
-            "/sys/fs/cgroup/cpu/docker/{id}",
-        ),
-        (
-            "/sys/fs/cgroup/cpuacct/system.slice/docker-{id}.scope",
-            "/sys/fs/cgroup/memory/system.slice/docker-{id}.scope",
-            "/sys/fs/cgroup/cpu/system.slice/docker-{id}.scope",
-        ),
-    ];
-
-    for (cpuacct_tmpl, mem_tmpl, cpu_tmpl) in &path_sets {
-        let cpuacct_dir = cpuacct_tmpl.replace("{id}", container_id);
-        let mem_dir = mem_tmpl.replace("{id}", container_id);
-        let cpu_dir = cpu_tmpl.replace("{id}", container_id);
-
-        let usage_ns = fs::read_to_string(format!("{}/cpuacct.usage", cpuacct_dir)).ok()?;
-        let cpu_usec = usage_ns.trim().parse::<u64>().ok()? / 1000;
-
-        let mem_current = fs::read_to_string(format!("{}/memory.usage_in_bytes", mem_dir)).ok()?;
-        let mem_limit_raw = fs::read_to_string(format!("{}/memory.limit_in_bytes", mem_dir)).ok()?;
-        let mem_bytes = mem_current.trim().parse::<u64>().ok()?;
-        let mem_limit = mem_limit_raw.trim().parse::<u64>().unwrap_or(u64::MAX);
-
-        let quota_ratio = (|| -> Option<f64> {
-            let q = fs::read_to_string(format!("{}/cpu.cfs_quota_us", cpu_dir)).ok()?;
-            let p = fs::read_to_string(format!("{}/cpu.cfs_period_us", cpu_dir)).ok()?;
-            let quota: i64 = q.trim().parse().ok()?;
-            let period: u64 = p.trim().parse().ok()?;
-            if quota <= 0 || period == 0 {
-                return None;
-            }
-            Some(quota as f64 / period as f64)
-        })();
-
-        return Some(CgroupSnapshot {
-            cpu_usage_usec: cpu_usec,
-            memory_bytes: mem_bytes,
-            memory_limit: mem_limit,
-            cpu_quota_ratio: quota_ratio,
-        });
-    }
-    None
+pub fn read_snapshot(path: &PathBuf) -> Option<CgroupSnapshot> {
+    Some(CgroupSnapshot {
+        cpu_usage_usec: read_cpu_usage_usec(path)?,
+        memory_bytes: read_memory_current(path)?,
+        memory_limit: read_memory_limit(path)?,
+        cpu_quota_ratio: read_cpu_quota(path),
+    })
 }
 
-pub fn read_snapshot(path: &PathBuf, container_id: &str) -> Option<CgroupSnapshot> {
-    (|| {
-        Some(CgroupSnapshot {
-            cpu_usage_usec: read_cpu_usage_usec(path)?,
-            memory_bytes: read_memory_current(path)?,
-            memory_limit: read_memory_limit(path)?,
-            cpu_quota_ratio: read_cpu_quota(path),
-        })
-    })()
-    .or_else(|| read_snapshot_v1(container_id))
-}
-
+// ponytail: prefix match is safe; Docker API guarantees short IDs are unique
 pub fn build_cgroup_map(ids: &[&str]) -> HashMap<String, PathBuf> {
     let all_dirs = find_cgroup_dirs();
     let mut result = HashMap::new();
-
     for id in ids {
         if let Some(path) = all_dirs.get(*id) {
             result.insert(id.to_string(), path.clone());
             continue;
         }
-
-        let matches: Vec<&String> = all_dirs.keys().filter(|full_id| full_id.starts_with(*id)).collect();
-        match matches.len() {
-            0 => {}
-            1 => {
-                result.insert(id.to_string(), all_dirs[matches[0]].clone());
-            }
-            _ => {
-                eprintln!(
-                    "Warning: ambiguous container ID '{}' matches {} cgroup directories, using first match",
-                    id,
-                    matches.len()
-                );
-                if let Some(first) = matches.first() {
-                    result.insert(id.to_string(), all_dirs[*first].clone());
-                }
+        for (full_id, path) in &all_dirs {
+            if full_id.starts_with(*id) {
+                result.insert(id.to_string(), path.clone());
+                break;
             }
         }
     }
-
     result
 }
