@@ -2,35 +2,40 @@ mod cgroup;
 
 use bollard::query_parameters::ListContainersOptions;
 use bollard::Docker;
-use make_colors::{make_colors_rgb, make_colors_hex_with_attrs};
-use regex::Regex;
 use std::collections::HashSet;
 use std::env;
-use std::sync::OnceLock;
 use tabled::builder::Builder;
 use tabled::settings::{Alignment, Modify, Padding, Style};
 use tabled::settings::object::Columns;
 use tokio::time::{sleep, Duration};
 
+// ponytail: inline ANSI helpers replace make_colors crate
+fn c(s: &str, r: u8, g: u8, b: u8) -> String {
+    format!("\x1b[38;2;{r};{g};{b}m{s}\x1b[0m")
+}
+fn cbg(s: &str, fr: u8, fg: u8, fb: u8, br: u8, bg: u8, bb: u8) -> String {
+    format!("\x1b[1m\x1b[48;2;{br};{bg};{bb}m\x1b[38;2;{fr};{fg};{fb}m{s}\x1b[0m")
+}
+
 fn print_version() {
     let v = env!("CARGO_PKG_VERSION");
-    println!("{} - v{}", make_colors_rgb("dof", (242, 205, 205), None), make_colors_rgb(v, (243, 139, 168), None));
-    println!("{} - {}", make_colors_rgb("Docker Usage Utility", (180, 190, 254), None), make_colors_rgb("A better 'docker ps' alternative", (249, 226, 175), None));
+    println!("{} - v{}", c("dof", 242, 205, 205), c(v, 243, 139, 168));
+    println!("{} - {}", c("Docker Usage Utility", 180, 190, 254), c("A better 'docker ps' alternative", 249, 226, 175));
 }
 
 fn print_help() {
     print_version();
     println!();
-    println!("{}", make_colors_rgb("USAGE:", (203, 166, 247), None));
+    println!("{}", c("USAGE:", 203, 166, 247));
     println!("    dof [OPTIONS]");
     println!();
-    println!("{}", make_colors_rgb("OPTIONS:", (203, 166, 247), None));
-    println!("    {}, -r       {}", make_colors_rgb("--running", (166, 227, 161), None), make_colors_rgb("Show only running containers", (205, 214, 244), None));
-    println!("    {}           {}", make_colors_rgb("--no-trunc", (166, 227, 161), None), make_colors_rgb("Show full container IDs without truncation", (205, 214, 244), None));
-    println!("    {}, -v       {}", make_colors_rgb("--version", (166, 227, 161), None), make_colors_rgb("Print version information", (205, 214, 244), None));
-    println!("    {}, -h       {}", make_colors_rgb("--help", (166, 227, 161), None), make_colors_rgb("Print help information", (205, 214, 244), None));
+    println!("{}", c("OPTIONS:", 203, 166, 247));
+    println!("    {}, -r       {}", c("--running", 166, 227, 161), c("Show only running containers", 205, 214, 244));
+    println!("    {}           {}", c("--no-trunc", 166, 227, 161), c("Show full container IDs without truncation", 205, 214, 244));
+    println!("    {}, -v       {}", c("--version", 166, 227, 161), c("Print version information", 205, 214, 244));
+    println!("    {}, -h       {}", c("--help", 166, 227, 161), c("Print help information", 205, 214, 244));
     println!();
-    println!("{}", make_colors_rgb("EXAMPLES:", (203, 166, 247), None));
+    println!("{}", c("EXAMPLES:", 203, 166, 247));
     println!("    dof              # List all containers");
     println!("    dof -r           # List only running containers");
     println!("    dof --no-trunc   # Show full container IDs");
@@ -135,12 +140,25 @@ fn format_ports(ports: &Option<Vec<bollard::models::PortSummary>>) -> String {
     }
 }
 
+// ponytail: char scan replaces regex crate
 fn colorize_ports(ports_str: &str) -> String {
-    let re = Regex::new(r"(\d+)").unwrap();
-    re.replace_all(ports_str, |caps: &regex::Captures| {
-        make_colors_rgb(&caps[1], (249, 226, 175), None)
-    })
-    .to_string()
+    let mut out = String::with_capacity(ports_str.len());
+    let mut buf = String::new();
+    for ch in ports_str.chars() {
+        if ch.is_ascii_digit() {
+            buf.push(ch);
+        } else {
+            if !buf.is_empty() {
+                out.push_str(&c(&buf, 249, 226, 175));
+                buf.clear();
+            }
+            out.push(ch);
+        }
+    }
+    if !buf.is_empty() {
+        out.push_str(&c(&buf, 249, 226, 175));
+    }
+    out
 }
 
 fn human_bytes(bytes: u64) -> String {
@@ -153,21 +171,19 @@ fn human_bytes(bytes: u64) -> String {
     format!("{}{}", val, units[exp])
 }
 
+// ponytail: no OnceLock, CLI runs once
 fn system_memory_bytes() -> u64 {
-    static MEM: OnceLock<u64> = OnceLock::new();
-    *MEM.get_or_init(|| {
-        if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
-            for line in content.lines() {
-                if let Some(rest) = line.strip_prefix("MemTotal:") {
-                    let kb_str: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
-                    if let Ok(kb) = kb_str.parse::<u64>() {
-                        return kb * 1024;
-                    }
+    if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                let kb_str: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
+                if let Ok(kb) = kb_str.parse::<u64>() {
+                    return kb * 1024;
                 }
             }
         }
-        u64::MAX
-    })
+    }
+    u64::MAX
 }
 
 fn cpu_gauge(percent: f64, width: usize) -> String {
@@ -176,12 +192,12 @@ fn cpu_gauge(percent: f64, width: usize) -> String {
     let empty = width.saturating_sub(filled);
 
     let filled_str = if filled > 0 {
-        make_colors_rgb(&"\u{2588}".repeat(filled), (166, 227, 161), None)
+        c(&"\u{2588}".repeat(filled), 166, 227, 161)
     } else {
         String::new()
     };
     let empty_str = if empty > 0 {
-        make_colors_rgb(&"\u{2591}".repeat(empty), (49, 50, 68), None)
+        c(&"\u{2591}".repeat(empty), 49, 50, 68)
     } else {
         String::new()
     };
@@ -196,15 +212,14 @@ fn build_table(
 ) -> tabled::Table {
     let mut builder = Builder::new();
 
-    // Header
     let header = [
-        make_colors_rgb("ID", (203, 166, 247), None),
-        make_colors_rgb("Name", (203, 166, 247), None),
-        make_colors_rgb("CPU", (203, 166, 247), None),
-        make_colors_rgb("Memory", (203, 166, 247), None),
-        make_colors_rgb("Health", (203, 166, 247), None),
-        make_colors_rgb("Status", (203, 166, 247), None),
-        make_colors_rgb("Ports", (203, 166, 247), None),
+        c("ID", 203, 166, 247),
+        c("Name", 203, 166, 247),
+        c("CPU", 203, 166, 247),
+        c("Memory", 203, 166, 247),
+        c("Health", 203, 166, 247),
+        c("Status", 203, 166, 247),
+        c("Ports", 203, 166, 247),
     ];
     builder.push_record(header);
 
@@ -227,33 +242,31 @@ fn build_table(
         let (health_symbol, is_healthy, is_unhealthy) = format_health(&container.status);
 
         let health_colored = if is_healthy {
-            make_colors_rgb(&health_symbol, (166, 227, 161), None)
+            c(&health_symbol, 166, 227, 161)
         } else if is_unhealthy {
-            make_colors_rgb(&health_symbol, (243, 139, 168), None)
+            c(&health_symbol, 243, 139, 168)
         } else if container.status.as_ref().map(|s| s.to_lowercase().contains("starting")).unwrap_or(false) {
-            make_colors_rgb(&health_symbol, (249, 226, 175), None)
+            c(&health_symbol, 249, 226, 175)
         } else {
-            make_colors_rgb(&health_symbol, (108, 112, 134), None)
+            c(&health_symbol, 108, 112, 134)
         };
 
-        // Status styling: Running = green fg, Stopped = pink bg + dark fg
         let status_colored = if is_running_status {
-            make_colors_rgb(&status_text, (166, 227, 161), None) // green
+            c(&status_text, 166, 227, 161)
         } else {
-            // Stopped: background #f38ba8 (243, 139, 168), foreground #11111b (17, 17, 27)
-            make_colors_hex_with_attrs("Stopped", "#11111b", Some("#f38ba8"), &["bold"]).unwrap()
+            cbg(&status_text, 17, 17, 27, 243, 139, 168)
         };
 
         let ports_text = colorize_ports(&format_ports(&container.ports));
 
         builder.push_record([
-            make_colors_rgb(&format_id(&container.id, args.no_trunc), (180, 190, 254), None),
-            make_colors_rgb(&format_names(&container.names), (148, 226, 213), None),
+            c(&format_id(&container.id, args.no_trunc), 180, 190, 254),
+            c(&format_names(&container.names), 148, 226, 213),
             cpu_str,
-            make_colors_rgb(&mem_str, (137, 180, 250), None),
+            c(&mem_str, 137, 180, 250),
             health_colored,
             status_colored,
-            make_colors_rgb(&ports_text, (205, 214, 244), None),
+            c(&ports_text, 205, 214, 244),
         ]);
     }
 
@@ -266,7 +279,8 @@ fn build_table(
     table
 }
 
-#[tokio::main]
+// ponytail: single-threaded runtime, no concurrent work
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = match parse_args() {
         Some(a) => a,

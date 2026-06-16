@@ -5,12 +5,8 @@ edition = "2021"
 
 [dependencies]
 bollard = { version = "0.21", features = ["chrono"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 tabled = { version = "0.21", features = ["ansi"] }
-indicatif = "0.18"
-make_colors = "1.0"
-catppuccin = "2.8"
-regex = "1"
 
 [profile.release]
 opt-level = 3
