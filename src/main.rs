@@ -186,26 +186,6 @@ fn system_memory_bytes() -> u64 {
     u64::MAX
 }
 
-// ponytail: handles >100% (multi-core container without --cpus) — bar fills at 100%, label shows actual value
-fn cpu_gauge(percent: f64, width: usize) -> String {
-    let filled = ((percent / 100.0) * width as f64).round() as usize;
-    let filled = filled.min(width);
-    let empty = width.saturating_sub(filled);
-
-    let filled_str = if filled > 0 {
-        c(&"\u{2588}".repeat(filled), 166, 227, 161)
-    } else {
-        String::new()
-    };
-    let empty_str = if empty > 0 {
-        c(&"\u{2591}".repeat(empty), 49, 50, 68)
-    } else {
-        String::new()
-    };
-
-    format!("{}{} {:.1}%", filled_str, empty_str, percent)
-}
-
 fn build_table(
     containers: Vec<bollard::models::ContainerSummary>,
     stats_map: HashMap<String, (f64, String)>,
@@ -231,7 +211,7 @@ fn build_table(
             .unwrap_or(false);
 
         let (cpu_str, mem_str) = if let Some((cpu_pct, mem)) = stats_map.get(&id) {
-            (cpu_gauge(*cpu_pct, 8), mem.clone())
+            (c(&format!("{:.2}%", cpu_pct), 166, 227, 161), mem.clone())
         } else if is_running {
             (c("   ERR   ", 243, 139, 168), c("   ERR   ", 243, 139, 168))
         } else {
