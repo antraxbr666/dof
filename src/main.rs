@@ -266,31 +266,22 @@ async fn fetch_cpu_from_docker_api(
     id: &str,
     sys_mem: u64,
 ) -> Option<(f64, String)> {
-    let options = StatsOptions {
-        stream: false,
-        one_shot: true,
-    };
-    let mut stream = docker.stats(id, Some(options));
-    let stats = stream.next().await.and_then(|r| r.ok())?;
+    let opts = || Some(StatsOptions { stream: false, one_shot: true });
 
-    let cpu = stats.cpu_stats.as_ref()?;
-    let pre = stats.precpu_stats.as_ref()?;
+    let s0 = docker.stats(id, opts()).next().await.and_then(|r| r.ok())?;
+    let t0_cpu = s0.cpu_stats.as_ref()?.cpu_usage.as_ref()?.total_usage?;
 
-    let cpu_delta = cpu.cpu_usage.as_ref()?.total_usage?
-        .saturating_sub(pre.cpu_usage.as_ref()?.total_usage?) as f64;
-    let sys_delta = cpu.system_cpu_usage?
-        .saturating_sub(pre.system_cpu_usage?) as f64;
+    sleep(Duration::from_millis(100)).await;
 
-    if sys_delta <= 0.0 {
-        return None;
-    }
+    let s1 = docker.stats(id, opts()).next().await.and_then(|r| r.ok())?;
+    let t1_cpu = s1.cpu_stats.as_ref()?.cpu_usage.as_ref()?.total_usage?;
 
-    let cpus = cpu.online_cpus.unwrap_or(1) as f64;
-    let cpu_pct = cpu_delta / sys_delta * cpus * 100.0;
+    // ponytail: (delta_ns / 100_000_000 ns) * 100 = delta_ns / 1_000_000
+    let cpu_pct = t1_cpu.saturating_sub(t0_cpu) as f64 / 1_000_000.0;
 
-    let mem_bytes = stats.memory_stats.as_ref()
+    let mem_bytes = s1.memory_stats.as_ref()
         .and_then(|m| m.usage).unwrap_or(0);
-    let mem_limit_raw = stats.memory_stats.as_ref()
+    let mem_limit_raw = s1.memory_stats.as_ref()
         .and_then(|m| m.limit).unwrap_or(u64::MAX);
     let limit = if mem_limit_raw == u64::MAX { sys_mem } else { mem_limit_raw };
     let mem_str = format!("{}/{}", human_bytes(mem_bytes), human_bytes(limit));
