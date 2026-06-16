@@ -164,9 +164,10 @@ dependencies = [
 
 [[package]]
 name = "dof"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bollard",
+ "futures-util",
  "tabled",
  "tokio",
 ]

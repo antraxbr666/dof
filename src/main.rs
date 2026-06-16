@@ -1,7 +1,8 @@
 mod cgroup;
 
-use bollard::query_parameters::ListContainersOptions;
+use bollard::query_parameters::{ListContainersOptions, StatsOptions};
 use bollard::Docker;
+use futures_util::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use tabled::builder::Builder;
@@ -278,6 +279,45 @@ fn build_table(
     table
 }
 
+// ponytail: single-call Docker API using precpu_stats + system_cpu_usage normalization
+// Same formula docker stats uses internally. ~1ms per call, no sampling delay needed.
+async fn fetch_cpu_from_docker_api(
+    docker: &Docker,
+    id: &str,
+    sys_mem: u64,
+) -> Option<(f64, String)> {
+    let options = StatsOptions {
+        stream: false,
+        one_shot: true,
+    };
+    let mut stream = docker.stats(id, Some(options));
+    let stats = stream.next().await.and_then(|r| r.ok())?;
+
+    let cpu = stats.cpu_stats.as_ref()?;
+    let pre = stats.precpu_stats.as_ref()?;
+
+    let cpu_delta = cpu.cpu_usage.as_ref()?.total_usage?
+        .saturating_sub(pre.cpu_usage.as_ref()?.total_usage?) as f64;
+    let sys_delta = cpu.system_cpu_usage?
+        .saturating_sub(pre.system_cpu_usage?) as f64;
+
+    if sys_delta <= 0.0 {
+        return None;
+    }
+
+    let cpus = cpu.online_cpus.unwrap_or(1) as f64;
+    let cpu_pct = cpu_delta / sys_delta * cpus * 100.0;
+
+    let mem_bytes = stats.memory_stats.as_ref()
+        .and_then(|m| m.usage).unwrap_or(0);
+    let mem_limit_raw = stats.memory_stats.as_ref()
+        .and_then(|m| m.limit).unwrap_or(u64::MAX);
+    let limit = if mem_limit_raw == u64::MAX { sys_mem } else { mem_limit_raw };
+    let mem_str = format!("{}/{}", human_bytes(mem_bytes), human_bytes(limit));
+
+    Some((cpu_pct, mem_str))
+}
+
 // ponytail: single-threaded runtime, no concurrent work
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -364,12 +404,18 @@ async fn main() {
             }
         }
 
-        // ponytail: containers without cgroup paths (e.g. cgroup v1) get "ERR" in the table
+        // ponytail: Docker API fallback for containers without cgroup path (cgroup v1, permissions, etc.)
         for id in &running_ids {
-            if !result.contains_key(id) && cgroup_map.contains_key(id.as_str()) {
+            if result.contains_key(id) {
+                continue;
+            }
+            if cgroup_map.contains_key(id.as_str()) {
                 eprintln!("Warning: container {} has cgroup path but stats read failed", &id[..12]);
-            } else if !result.contains_key(id) {
-                eprintln!("Warning: container {} has no cgroup path — is this system using cgroup v1?", &id[..12]);
+                continue;
+            }
+            match fetch_cpu_from_docker_api(&docker, id, sys_mem).await {
+                Some(stats) => { result.insert(id.clone(), stats); }
+                None => { eprintln!("Warning: container {} — cgroup v2 not found and Docker API stats also failed", &id[..12]); }
             }
         }
 
